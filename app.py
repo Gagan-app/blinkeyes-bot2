@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+import io
 import threading
 import qrcode
 import os
@@ -371,6 +372,7 @@ async def sub_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
+   
 async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -406,7 +408,6 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 
     context.user_data['final_price'] = final_price
     
-    # 🔍 Fetch UPI ID from database safely
     upi_id, qr_file_id = get_payment_config(plan_key)
     if not upi_id or upi_id == 'your_merchant_upi@paytm':
         conn = sqlite3.connect(DB_NAME)
@@ -419,12 +420,13 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if not qr_file_id:
                 qr_file_id = fallback_cfg[1]
 
+    upi_pay_link = f"upi://pay?pa={upi_id}&pn=BlinkeyesAutomation&am={final_price}&cu=INR"
+
     text = (
-        f"💳 **Payment Details ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
-        f"1. Apne kisi bhi UPI App (PhonePe / GPay / Paytm) mein jayein.\n"
-        f"2. Niche di gayi **UPI ID** par exact **₹{final_price}** send karein.\n"
-        f"3. Payment ke baad **UPI Transaction ID (UTR)** yahan chat mein bhej dein.\n\n"
-        f"📌 **Merchant UPI ID (Tap to Copy):**\n`{upi_id}`"
+        f"💳 **Pay via QR / UPI ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
+        f"1. Is QR Code ko apne kisi bhi UPI App se scan karein.\n"
+        f"2. Ya phir UPI ID par direct payment karein: `{upi_id}`\n"
+        f"3. Payment ke baad **UPI Transaction ID (UTR)** yahan chat mein bhej dein."
     )
     
     keyboard = [
@@ -438,7 +440,6 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
 
-    # Agar admin ne custom QR photo save ki hai toh wo dikhayein, warna clean text message
     if qr_file_id:
         try:
             await context.bot.send_photo(
@@ -452,12 +453,28 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
-    )
+    # In-memory QR generation using io.BytesIO (No disk write issues on Render)
+    try:
+        img = qrcode.make(upi_pay_link)
+        bio = io.BytesIO()
+        img.save(bio, format='PNG')
+        bio.seek(0)
+        
+        await context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo=bio,
+            caption=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logging.error(f"QR generation error: {e}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=text + f"\n\n📌 **UPI ID:** `{upi_id}`",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
 
 async def prompt_coupon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
