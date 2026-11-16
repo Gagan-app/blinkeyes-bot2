@@ -9,6 +9,7 @@ import string
 import json
 import re
 from datetime import datetime, timedelta
+from flask import Flask  # 👈 Flask import yahan hai
 from moviepy import TextClip, ColorClip, CompositeVideoClip, AudioFileClip
 from gtts import gTTS
 from googleapiclient.discovery import build
@@ -42,13 +43,6 @@ HOOK_FORMULAS = [
     {"type": "Transformation", "template": "How 1 minute of {niche_topic} daily completely changes your perspective."},
     {"type": "Stat/Fact", "template": "95% of people fail at {niche_topic} because they miss this core principle."}
 ]
-
-def main():
-    # Start background web server for Render port check
-    threading.Thread(target=run_web, daemon=True).start()
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    # ... (baaki saare handlers wese hi rahenge)
 
 def calculate_hook_score(text):
     score = 5.0
@@ -852,7 +846,6 @@ async def show_specific_channel_modes(update: Update, context: ContextTypes.DEFA
     ch_id, ch_info, active_mode, selected_niche, platform = ch
     mode_text = active_mode.upper() if active_mode else "NONE"
     
-    # 🔴 Fix: Niche sirf tabhi show hogi jab active_mode == 'ai' ho
     if active_mode == 'ai' and selected_niche and selected_niche != 'none':
         niche_display = f"  ┗ Mode: `{mode_text}` | Niche: `{selected_niche}`"
     else:
@@ -1464,6 +1457,9 @@ def run_web():
     
 # --- MAIN FUNCTION ---
 def main():
+    # 🌐 Render ke port requirement ke liye web server thread start karein
+    threading.Thread(target=run_web, daemon=True).start()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
