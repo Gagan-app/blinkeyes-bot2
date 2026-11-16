@@ -1513,7 +1513,6 @@ def home():
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
-
 @web_app.route('/webhook/payment', methods=['POST'])
 def payment_webhook():
     data = request.json or {}
@@ -1525,6 +1524,7 @@ def payment_webhook():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
+    # Bina amount ke bhi sabse latest pending user ko turant utha lo
     cursor.execute("SELECT id, user_id, plan_key FROM pending_payments ORDER BY id DESC LIMIT 1")
     pending = cursor.fetchone()
     
@@ -1534,6 +1534,7 @@ def payment_webhook():
         
     p_id, user_id, plan_key = pending
     
+    # Is pending payment ko delete kar do taaki dubara use na ho
     cursor.execute("DELETE FROM pending_payments WHERE id = ?", (p_id,))
     conn.commit()
     conn.close()
@@ -1564,7 +1565,7 @@ def payment_webhook():
         logging.error(f"Error sending automatic success message: {e}")
         
     return jsonify({"status": "success", "message": f"Subscription activated for user {user_id}!"}), 200
-
+    
 # --- MAIN FUNCTION ---
 def main():
     threading.Thread(target=run_web, daemon=True).start()
