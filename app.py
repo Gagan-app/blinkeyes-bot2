@@ -406,10 +406,9 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 
     context.user_data['final_price'] = final_price
     
-    # 🔍 Fetch payment config safely with fallback to any active custom UPI ID
+    # 🔍 Fetch UPI ID from database safely
     upi_id, qr_file_id = get_payment_config(plan_key)
     if not upi_id or upi_id == 'your_merchant_upi@paytm':
-        # Fallback to get any recently saved admin UPI ID if specific plan key lookup missed
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
@@ -420,17 +419,15 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if not qr_file_id:
                 qr_file_id = fallback_cfg[1]
 
-    upi_pay_link = f"upi://pay?pa={upi_id}&pn=BlinkeyesAutomation&am={final_price}&cu=INR"
-
     text = (
-        f"💳 **Pay via UPI ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
-        f"1. Niche diye gaye **Pay via App Link** button par click karke payment karein.\n"
-        f"2. Payment ke baad **UPI Transaction ID (UTR)** niche chat mein bhej dein.\n\n"
-        f"📌 **Merchant UPI ID:** `{upi_id}`"
+        f"💳 **Payment Details ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
+        f"1. Apne kisi bhi UPI App (PhonePe / GPay / Paytm) mein jayein.\n"
+        f"2. Niche di gayi **UPI ID** par exact **₹{final_price}** send karein.\n"
+        f"3. Payment ke baad **UPI Transaction ID (UTR)** yahan chat mein bhej dein.\n\n"
+        f"📌 **Merchant UPI ID (Tap to Copy):**\n`{upi_id}`"
     )
     
     keyboard = [
-        [InlineKeyboardButton("🔗 Pay via App Link", url=upi_pay_link)],
         [InlineKeyboardButton("🎟️ Apply Coupon / Gift Code", callback_data=f"prompt_coupon_{plan_key}")],
         [InlineKeyboardButton("✅ I Have Paid (Submit UTR)", callback_data=f"submit_utr_{plan_key}")],
         [InlineKeyboardButton("« Back to Plans", callback_data="sub_plans")]
@@ -441,7 +438,7 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
 
-    # Agar admin ne custom QR photo upload ki thi, toh wo bhejein, warna direct link/text message bhejein
+    # Agar admin ne custom QR photo save ki hai toh wo dikhayein, warna clean text message
     if qr_file_id:
         try:
             await context.bot.send_photo(
@@ -455,15 +452,12 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-    # Safe fallback: Always send clean text message with clickable UPI deep link button
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=text,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
-
-
 
 async def prompt_coupon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
