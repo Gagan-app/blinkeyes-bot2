@@ -1498,7 +1498,58 @@ def home():
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
+
+from flask import request, jsonify
+
+@web_app.route('/webhook/payment', methods=['POST'])
+def payment_webhook():
+    data = request.json or {}
+    secret_token = data.get('secret')
     
+    # Security ke liye ek simple secret key match kar sakte hain
+    if secret_token != "blinkeyes_secure_pay_2026":
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+        
+    user_id = data.get('user_id')
+    plan_key = data.get('plan_key')
+    
+    if not user_id or not plan_key:
+        return jsonify({"status": "error", "message": "Missing user_id or plan_key"}), 400
+        
+    # Plan ke hisab se duration set karna (e.g. 30 days for 1 month, 180 days for 6 months)
+    duration_days = 180 if "499" in plan_key or "1299" in plan_key or "2199" in plan_key else 30
+    
+    plan_name = plan_key.replace("_", " ").title()
+    buy_d = datetime.now().strftime("%Y-%m-%d")
+    exp_d = (datetime.now() + timedelta(days=duration_days)).strftime("%Y-%m-%d")
+    
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
+                   (int(user_id), plan_name, buy_d, exp_d))
+    conn.commit()
+    conn.close()
+    
+    # Bot ke zariye user ko success message bhejna
+    # (Note: Async function ko background mein trigger karne ke liye loop use hota hai)
+    try:
+        import asyncio
+        # Yahan hum background loop mein message bhej sakte hain
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        # Global application bot instance ya token se message bhej sakte hain
+        import telegram
+        bot_instance = telegram.Bot(token=BOT_TOKEN)
+        loop.run_until_complete(bot_instance.send_message(
+            chat_id=int(user_id),
+            text=f"🎉 **Payment Successful & Verified!**\n\nAapka **{plan_name}** subscription automatic activate kar diya gaya hai! Ab aap apne channels manage kar sakte hain.",
+            parse_mode="Markdown"
+        ))
+    except Exception as e:
+        logging.error(f"Error sending automatic success message: {e}")
+        
+    return jsonify({"status": "success", "message": "Subscription activated successfully!"}), 200
+
 # --- MAIN FUNCTION ---
 def main():
     # 🌐 Render ke port requirement ke liye web server thread start karein
