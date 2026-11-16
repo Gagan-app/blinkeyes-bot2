@@ -22,7 +22,7 @@ from telegram.ext import (
 # Logging configuration
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-BOT_TOKEN = "8194542157:AAH7jvm-b2JU0LtHcLbeZlmVadNIsYOpCLQ"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 8122669942
 DB_NAME = "bot_data.db"
 
