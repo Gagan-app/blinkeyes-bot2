@@ -371,7 +371,6 @@ async def sub_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
-
 async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -408,12 +407,11 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['final_price'] = final_price
     upi_id, qr_file_id = get_payment_config(plan_key)
 
-    # 🔗 Direct Deep Link generate karna taaki bina QR ke bhi click karke pay ho sake
     upi_pay_link = f"upi://pay?pa={upi_id}&pn=BlinkeyesAutomation&am={final_price}&cu=INR"
 
     text = (
-        f"💳 **Pay via Merchant QR Code ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
-        f"1. Agar QR scan na ho, toh niche diye gaye **Direct Payment Link** par click karein.\n"
+        f"💳 **Pay via UPI ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
+        f"1. Niche diye gaye **Direct Payment Link** par click karke payment karein.\n"
         f"2. Payment ke baad **UPI Transaction ID (UTR)** niche chat mein bhej dein.\n\n"
         f"📌 **UPI ID:** `{upi_id}`\n"
         f"🔗 [Click Here to Pay Direct via App]({upi_pay_link})"
@@ -426,11 +424,13 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("« Back to Plans", callback_data="sub_plans")]
     ]
     
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+    # Agar admin ne pehle se custom QR file id save kiya hai toh wo bhejein
     if qr_file_id:
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=qr_file_id,
@@ -439,24 +439,32 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="Markdown"
         )
     else:
-        file_path = f"{plan_key}_qr.png"
-        img = qrcode.make(upi_pay_link)
-        img.save(file_path)
-        
+        # Try generating QR locally, if it fails, send text message with link gracefully
         try:
-            await query.message.delete()
-        except Exception:
-            pass
+            file_path = f"{plan_key}_qr.png"
+            img = qrcode.make(upi_pay_link)
+            img.save(file_path)
             
-        with open(file_path, 'rb') as photo_file:
-            await context.bot.send_photo(
+            with open(file_path, 'rb') as photo_file:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=photo_file,
+                    caption=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as qr_err:
+            logging.error(f"QR Generation Error: {qr_err}")
+            # Fallback: Send message without photo if QR generation fails completely
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                photo=photo_file,
-                caption=text,
+                text=text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
-            
+
 async def prompt_coupon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
