@@ -10,7 +10,7 @@ import string
 import json
 import re
 from datetime import datetime, timedelta
-from flask import Flask  # 👈 Flask import yahan hai
+from flask import Flask, request, jsonify
 from moviepy import TextClip, ColorClip, CompositeVideoClip, AudioFileClip
 from gtts import gTTS
 from googleapiclient.discovery import build
@@ -153,6 +153,15 @@ def ensure_tables_exist():
         )
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pending_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            plan_key TEXT,
+            amount REAL,
+            created_at TEXT
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS feature_controls (
             feature_key TEXT PRIMARY KEY,
             is_enabled INTEGER DEFAULT 1
@@ -170,6 +179,7 @@ def is_feature_enabled(key):
     row = cursor.fetchone()
     conn.close()
     return (row[0] == 1) if row else True
+
 def get_payment_config(plan_key):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -177,11 +187,9 @@ def get_payment_config(plan_key):
     result = cursor.fetchone()
     conn.close()
     
-    # Agar database mein mil jaye aur default na ho, toh wahi return karein
     if result and result[0]:
         return result
     
-    # Agar us specific plan ke liye nahi mila, toh kisi bhi available plan ki latest UPI ID utha lo
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
@@ -206,7 +214,6 @@ def save_payment_config(plan_key, upi_id, qr_image_file_id=None):
 
 def get_main_menu(is_admin=False):
     keyboard = []
-    
     row1 = []
     if is_feature_enabled('profile'): row1.append(InlineKeyboardButton("👤 Profile", callback_data="menu_profile"))
     if is_feature_enabled('channels'): row1.append(InlineKeyboardButton("📺 My Channels", callback_data="menu_channels"))
@@ -408,6 +415,16 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 
     context.user_data['final_price'] = final_price
     
+    # Save pending payment entry for auto-verification
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO pending_payments (user_id, plan_key, amount, created_at) VALUES (?, ?, ?, ?)",
+        (update.effective_user.id, plan_key, final_price, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+    conn.commit()
+    conn.close()
+    
     upi_id, qr_file_id = get_payment_config(plan_key)
     if not upi_id or upi_id == 'your_merchant_upi@paytm':
         conn = sqlite3.connect(DB_NAME)
@@ -453,7 +470,6 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-    # In-memory QR generation using io.BytesIO (No disk write issues on Render)
     try:
         img = qrcode.make(upi_pay_link)
         bio = io.BytesIO()
@@ -852,7 +868,6 @@ async def channel_management_callback(update: Update, context: ContextTypes.DEFA
             mode_text = mode_val.upper() if mode_val else "NONE"
             niche_text = niche_val if niche_val else "None"
             
-            # Agar mode 'ai' hai tabhi niche dikhaye
             if mode_val == 'ai' and niche_val and niche_val != 'none':
                 text += f"• 🆔 **{ch_info}**\n  ┗ Mode: `{mode_text}` | Niche: `{niche_text}`\n\n"
             else:
@@ -1499,26 +1514,31 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
 
-from flask import request, jsonify
-
 @web_app.route('/webhook/payment', methods=['POST'])
 def payment_webhook():
     data = request.json or {}
     secret_token = data.get('secret')
     
-    # Security ke liye ek simple secret key match kar sakte hain
     if secret_token != "blinkeyes_secure_pay_2026":
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
         
-    user_id = data.get('user_id')
-    plan_key = data.get('plan_key')
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
     
-    if not user_id or not plan_key:
-        return jsonify({"status": "error", "message": "Missing user_id or plan_key"}), 400
+    cursor.execute("SELECT id, user_id, plan_key FROM pending_payments ORDER BY id DESC LIMIT 1")
+    pending = cursor.fetchone()
+    
+    if not pending:
+        conn.close()
+        return jsonify({"status": "error", "message": "No pending payment found"}), 404
         
-    # Plan ke hisab se duration set karna (e.g. 30 days for 1 month, 180 days for 6 months)
-    duration_days = 180 if "499" in plan_key or "1299" in plan_key or "2199" in plan_key else 30
+    p_id, user_id, plan_key = pending
     
+    cursor.execute("DELETE FROM pending_payments WHERE id = ?", (p_id,))
+    conn.commit()
+    conn.close()
+    
+    duration_days = 180 if "499" in plan_key or "1299" in plan_key or "2199" in plan_key else 30
     plan_name = plan_key.replace("_", " ").title()
     buy_d = datetime.now().strftime("%Y-%m-%d")
     exp_d = (datetime.now() + timedelta(days=duration_days)).strftime("%Y-%m-%d")
@@ -1530,29 +1550,23 @@ def payment_webhook():
     conn.commit()
     conn.close()
     
-    # Bot ke zariye user ko success message bhejna
-    # (Note: Async function ko background mein trigger karne ke liye loop use hota hai)
     try:
-        import asyncio
-        # Yahan hum background loop mein message bhej sakte hain
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        # Global application bot instance ya token se message bhej sakte hain
         import telegram
         bot_instance = telegram.Bot(token=BOT_TOKEN)
         loop.run_until_complete(bot_instance.send_message(
             chat_id=int(user_id),
-            text=f"🎉 **Payment Successful & Verified!**\n\nAapka **{plan_name}** subscription automatic activate kar diya gaya hai! Ab aap apne channels manage kar sakte hain.",
+            text=f"🎉 **Payment Successful & Verified Automatically!**\n\nAapka **{plan_name}** subscription activate kar diya gaya hai! Ab aap apne channels manage kar sakte hain.",
             parse_mode="Markdown"
         ))
     except Exception as e:
         logging.error(f"Error sending automatic success message: {e}")
         
-    return jsonify({"status": "success", "message": "Subscription activated successfully!"}), 200
+    return jsonify({"status": "success", "message": f"Subscription activated for user {user_id}!"}), 200
 
 # --- MAIN FUNCTION ---
 def main():
-    # 🌐 Render ke port requirement ke liye web server thread start karein
     threading.Thread(target=run_web, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
