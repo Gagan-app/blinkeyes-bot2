@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+import threading
 import qrcode
 import os
 import asyncio
@@ -41,6 +42,13 @@ HOOK_FORMULAS = [
     {"type": "Transformation", "template": "How 1 minute of {niche_topic} daily completely changes your perspective."},
     {"type": "Stat/Fact", "template": "95% of people fail at {niche_topic} because they miss this core principle."}
 ]
+
+def main():
+    # Start background web server for Render port check
+    threading.Thread(target=run_web, daemon=True).start()
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # ... (baaki saare handlers wese hi rahenge)
 
 def calculate_hook_score(text):
     score = 5.0
@@ -1443,6 +1451,17 @@ async def background_scheduler_loop(bot):
             logging.error(f"Scheduler Loop Error: {e}")
         await asyncio.sleep(60)
 
+# --- 🌐 RENDER WEB PORT KEEPER ---
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Blinkeyes Bot is Alive & Running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port)
+    
 # --- MAIN FUNCTION ---
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
