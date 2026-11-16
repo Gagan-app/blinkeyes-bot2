@@ -408,21 +408,29 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['final_price'] = final_price
     upi_id, qr_file_id = get_payment_config(plan_key)
 
+    # 🔗 Direct Deep Link generate karna taaki bina QR ke bhi click karke pay ho sake
+    upi_pay_link = f"upi://pay?pa={upi_id}&pn=BlinkeyesAutomation&am={final_price}&cu=INR"
+
     text = (
         f"💳 **Pay via Merchant QR Code ({plan_type.upper()} - ₹{final_price})**{discount_text}\n\n"
-        f"1. Niche diye gaye **QR Code** par PhonePe, Paytm ya GPay se ₹{final_price} pay karein.\n"
+        f"1. Agar QR scan na ho, toh niche diye gaye **Direct Payment Link** par click karein.\n"
         f"2. Payment ke baad **UPI Transaction ID (UTR)** niche chat mein bhej dein.\n\n"
-        f"📌 **UPI ID:** `{upi_id}`"
+        f"📌 **UPI ID:** `{upi_id}`\n"
+        f"🔗 [Click Here to Pay Direct via App]({upi_pay_link})"
     )
     
     keyboard = [
+        [InlineKeyboardButton("🔗 Pay via App Link", url=upi_pay_link)],
         [InlineKeyboardButton("🎟️ Apply Coupon / Gift Code", callback_data=f"prompt_coupon_{plan_key}")],
         [InlineKeyboardButton("✅ I Have Paid (Submit UTR)", callback_data=f"submit_utr_{plan_key}")],
         [InlineKeyboardButton("« Back to Plans", callback_data="sub_plans")]
     ]
     
     if qr_file_id:
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=qr_file_id,
@@ -431,12 +439,15 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="Markdown"
         )
     else:
-        qr_data = f"upi://pay?pa={upi_id}&pn=Blinkeyes&am={final_price}&cu=INR"
         file_path = f"{plan_key}_qr.png"
-        img = qrcode.make(qr_data)
+        img = qrcode.make(upi_pay_link)
         img.save(file_path)
         
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+            
         with open(file_path, 'rb') as photo_file:
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
@@ -445,7 +456,7 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
-
+            
 async def prompt_coupon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
