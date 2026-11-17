@@ -20,13 +20,17 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
+import libsql_client  # <--- Turso Client Added
 
 # Logging configuration
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 8122669942
-DB_NAME = "bot_data.db"
+
+# --- TURSO DATABASE CREDENTIALS ---
+TURSO_URL = "libsql://aapka-database-url.turso.io"      # Yahan apna Turso URL daalein
+TURSO_TOKEN = "aapka_auth_token_yahan_aayega"       # Yahan apna Turso Auth Token daalein
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -95,17 +99,19 @@ NICHE_LIST = [
     "English Learning"
 ]
 
+def get_db():
+    return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
+
 def ensure_tables_exist():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
+    client = get_db()
+    client.execute('''
         CREATE TABLE IF NOT EXISTS payment_configs (
             plan_key TEXT PRIMARY KEY,
             upi_id TEXT,
             qr_image_file_id TEXT
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS connected_channels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -117,7 +123,7 @@ def ensure_tables_exist():
             custom_prompt TEXT DEFAULT 'none'
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS subscriptions (
             user_id INTEGER PRIMARY KEY,
             plan_name TEXT DEFAULT 'Free Trial',
@@ -125,7 +131,7 @@ def ensure_tables_exist():
             expire_date TEXT
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS gift_codes (
             code TEXT PRIMARY KEY,
             plan_name TEXT,
@@ -133,13 +139,13 @@ def ensure_tables_exist():
             discount_value REAL
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS subscription_prices (
             plan_key TEXT PRIMARY KEY,
             price REAL
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS upload_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -151,7 +157,7 @@ def ensure_tables_exist():
             slot_6 TEXT DEFAULT '23:00'
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS pending_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -160,7 +166,7 @@ def ensure_tables_exist():
             created_at TEXT
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS received_payments (
             utr TEXT PRIMARY KEY,
             raw_text TEXT,
@@ -168,54 +174,49 @@ def ensure_tables_exist():
             received_at TEXT
         )
     ''')
-    cursor.execute('''
+    client.execute('''
         CREATE TABLE IF NOT EXISTS feature_controls (
             feature_key TEXT PRIMARY KEY,
             is_enabled INTEGER DEFAULT 1
         )
     ''')
-    conn.commit()
-    conn.close()
+    client.close()
 
 ensure_tables_exist()
 
 def is_feature_enabled(key):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT is_enabled FROM feature_controls WHERE feature_key = ?", (key,))
-    row = cursor.fetchone()
-    conn.close()
-    return (row[0] == 1) if row else True
+    client = get_db()
+    res = client.execute("SELECT is_enabled FROM feature_controls WHERE feature_key = ?", (key,))
+    client.close()
+    row = res.rows if hasattr(res, 'rows') else res
+    return (row[0][0] == 1) if row else True
 
 def get_payment_config(plan_key):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE plan_key = ?", (plan_key,))
-    result = cursor.fetchone()
+    client = get_db()
+    res = client.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE plan_key = ?", (plan_key,))
+    result = res.rows if hasattr(res, 'rows') else res
     
-    if result and result[0] and result[0] != 'your_merchant_upi@paytm':
-        conn.close()
-        return result
+    if result and result[0][0] and result[0][0] != 'your_merchant_upi@paytm':
+        client.close()
+        return result[0]
     
-    cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
-    fallback = cursor.fetchone()
-    conn.close()
+    res2 = client.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
+    fallback = res2.rows if hasattr(res2, 'rows') else res2
+    client.close()
     
     if fallback:
-        return fallback
+        return fallback[0]
         
     return ("your_merchant_upi@paytm", None)
     
 def save_payment_config(plan_key, upi_id, qr_image_file_id=None):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
+    client = get_db()
+    client.execute('''
         INSERT INTO payment_configs (plan_key, upi_id, qr_image_file_id)
         VALUES (?, ?, ?)
         ON CONFLICT(plan_key) DO UPDATE SET upi_id = excluded.upi_id, qr_image_file_id = COALESCE(excluded.qr_image_file_id, qr_image_file_id)
     ''', (plan_key, upi_id, qr_image_file_id))
-    conn.commit()
-    conn.close()
+    client.close()
 
 def get_main_menu(is_admin=False):
     keyboard = []
@@ -239,16 +240,15 @@ def get_main_menu(is_admin=False):
     return InlineKeyboardMarkup(keyboard)
 
 async def check_user_subscription_active(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT expire_date FROM subscriptions WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT expire_date FROM subscriptions WHERE user_id = ?", (user_id,))
+    client.close()
+    row = res.rows if hasattr(res, 'rows') else res
     
     if not row:
         return False
         
-    exp_str = row[0]
+    exp_str = row[0][0]
     try:
         exp_date = datetime.strptime(exp_str, "%Y-%m-%d")
         if datetime.now() <= exp_date:
@@ -261,16 +261,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_admin = (user.id == ADMIN_ID)
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM subscriptions WHERE user_id = ?", (user.id,))
-    if not cursor.fetchone():
+    client = get_db()
+    res = client.execute("SELECT user_id FROM subscriptions WHERE user_id = ?", (user.id,))
+    rows = res.rows if hasattr(res, 'rows') else res
+    if not rows:
         buy_d = datetime.now().strftime("%Y-%m-%d")
         exp_d = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        cursor.execute("INSERT INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
+        client.execute("INSERT INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
                        (user.id, "Free Trial", buy_d, exp_d))
-        conn.commit()
-    conn.close()
+    client.close()
     
     welcome_text = (
         f"👋 Welcome to **Blinkeyes Automation Bot**, {user.first_name}!\n\n"
@@ -287,11 +286,11 @@ async def profile_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user = update.effective_user
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT plan_name, buy_date, expire_date FROM subscriptions WHERE user_id = ?", (user.id,))
-    sub = cursor.fetchone()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT plan_name, buy_date, expire_date FROM subscriptions WHERE user_id = ?", (user.id,))
+    client.close()
+    sub_rows = res.rows if hasattr(res, 'rows') else res
+    sub = sub_rows[0] if sub_rows else None
     
     plan_name = sub[0] if sub else "Free Trial"
     buy_date = sub[1] if sub else "N/A"
@@ -316,11 +315,11 @@ async def subscription_status_menu(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     
     user = update.effective_user
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT plan_name, buy_date, expire_date FROM subscriptions WHERE user_id = ?", (user.id,))
-    sub = cursor.fetchone()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT plan_name, buy_date, expire_date FROM subscriptions WHERE user_id = ?", (user.id,))
+    client.close()
+    sub_rows = res.rows if hasattr(res, 'rows') else res
+    sub = sub_rows[0] if sub_rows else None
     
     plan_name = sub[0] if sub else "Free Trial"
     buy_date = sub[1] if sub else "N/A"
@@ -343,11 +342,11 @@ async def sub_plans_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT plan_key, price FROM subscription_prices")
-    prices = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT plan_key, price FROM subscription_prices")
+    client.close()
+    price_rows = res.rows if hasattr(res, 'rows') else res
+    prices = {row[0]: row[1] for row in price_rows}
     
     p_s99 = prices.get("silver_99", 99)
     p_s499 = prices.get("silver_499", 499)
@@ -397,11 +396,11 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['active_plan_key'] = plan_key
     context.user_data['pending_plan_key'] = plan_key 
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT price FROM subscription_prices WHERE plan_key = ?", (plan_key,))
-    row = cursor.fetchone()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT price FROM subscription_prices WHERE plan_key = ?", (plan_key,))
+    client.close()
+    price_rows = res.rows if hasattr(res, 'rows') else res
+    row = price_rows[0] if price_rows else None
     
     base_price = row[0] if row else (99 if duration == "99" else 499)
     
@@ -423,11 +422,11 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     
     upi_id, qr_file_id = get_payment_config(plan_key)
     if not upi_id or upi_id == 'your_merchant_upi@paytm':
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
-        fallback_cfg = cursor.fetchone()
-        conn.close()
+        client = get_db()
+        res_fb = client.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE UPI_id != 'your_merchant_upi@paytm' LIMIT 1")
+        client.close()
+        fb_rows = res_fb.rows if hasattr(res_fb, 'rows') else res_fb
+        fallback_cfg = fb_rows[0] if fb_rows else None
         if fallback_cfg:
             upi_id = fallback_cfg[0]
             if not qr_file_id:
@@ -553,11 +552,11 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if context.user_data.get('waiting_for_coupon'):
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT plan_name, discount_type, discount_value FROM gift_codes WHERE code = ?", (text_content,))
-        g_data = cursor.fetchone()
-        conn.close()
+        client = get_db()
+        res = client.execute("SELECT plan_name, discount_type, discount_value FROM gift_codes WHERE code = ?", (text_content,))
+        client.close()
+        g_rows = res.rows if hasattr(res, 'rows') else res
+        g_data = g_rows[0] if g_rows else None
         
         if g_data:
             g_plan, d_type, d_val = g_data
@@ -583,12 +582,10 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 
             rand_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
             
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO gift_codes (code, plan_name, discount_type, discount_value) VALUES (?, ?, ?, ?)", 
+            client = get_db()
+            client.execute("INSERT OR REPLACE INTO gift_codes (code, plan_name, discount_type, discount_value) VALUES (?, ?, ?, ?)", 
                            (rand_code, plan_name, d_type, d_val))
-            conn.commit()
-            conn.close()
+            client.close()
             
             await update.message.reply_text(
                 f"🎁 **Coupon / Gift Code Generated!**\n\n"
@@ -606,11 +603,9 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         plan_key = context.user_data.get('target_sub_plan')
         try:
             new_price = float(text_content)
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO subscription_prices (plan_key, price) VALUES (?, ?)", (plan_key, new_price))
-            conn.commit()
-            conn.close()
+            client = get_db()
+            client.execute("INSERT OR REPLACE INTO subscription_prices (plan_key, price) VALUES (?, ?)", (plan_key, new_price))
+            client.close()
             
             await update.message.reply_text(f"✅ Price for `{plan_key}` updated to `₹{new_price}` successfully!", parse_mode="Markdown")
         except ValueError:
@@ -625,11 +620,9 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if len(text_content) == 5 and ":" in text_content:
             col_name = f"slot_{slot_num}"
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute(f"UPDATE upload_schedules SET {col_name} = ? WHERE user_id = ?", (text_content, user.id))
-            conn.commit()
-            conn.close()
+            client = get_db()
+            client.execute(f"UPDATE upload_schedules SET {col_name} = ? WHERE user_id = ?", (text_content, user.id))
+            client.close()
             
             await update.message.reply_text(f"✅ **Slot {slot_num} updated to {text_content}!**", parse_mode="Markdown")
             context.user_data.pop('editing_slot', None)
@@ -673,21 +666,19 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             except Exception as fetch_err:
                 logging.error(f"Error fetching channel name: {fetch_err}")
 
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute(
+            client = get_db()
+            res_ex = client.execute(
                 "SELECT id FROM connected_channels WHERE user_id = ? AND platform = ? AND channel_info = ?",
                 (user.id, "YouTube", channel_title)
             )
-            existing = cursor.fetchone()
+            ex_rows = res_ex.rows if hasattr(res_ex, 'rows') else res_ex
             
-            if not existing:
-                cursor.execute(
+            if not ex_rows:
+                client.execute(
                     "INSERT INTO connected_channels (user_id, platform, channel_info, active_mode) VALUES (?, ?, ?, ?)", 
                     (user.id, "YouTube", channel_title, "none")
                 )
-                conn.commit()
-            conn.close()
+            client.close()
 
             await update.message.reply_text(
                 f"🎉 **Success!** Aapka YouTube channel **{channel_title}** safaltapurvak connect ho gaya hai!\n"
@@ -709,25 +700,24 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("⚠️ Kripya apni sahi **12-digit UPI Transaction ID (UTR)** enter karein:")
             return
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT is_used FROM received_payments WHERE utr = ?", (utr_input,))
-        payment_record = cursor.fetchone()
+        client = get_db()
+        res_pay = client.execute("SELECT is_used FROM received_payments WHERE utr = ?", (utr_input,))
+        pay_rows = res_pay.rows if hasattr(res_pay, 'rows') else res_pay
+        payment_record = pay_rows[0] if pay_rows else None
         
         if payment_record and payment_record[0] == 0:
-            cursor.execute("UPDATE received_payments SET is_used = 1 WHERE utr = ?", (utr_input,))
+            client.execute("UPDATE received_payments SET is_used = 1 WHERE utr = ?", (utr_input,))
             
             duration_days = 180 if any(x in plan_key for x in ["499", "1299", "2199"]) else 30
             plan_name = plan_key.replace("_", " ").title()
             buy_d = datetime.now().strftime("%Y-%m-%d")
             exp_d = (datetime.now() + timedelta(days=duration_days)).strftime("%Y-%m-%d")
             
-            cursor.execute(
+            client.execute(
                 "INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
                 (user.id, plan_name, buy_d, exp_d)
             )
-            conn.commit()
-            conn.close()
+            client.close()
             
             context.user_data.pop('pending_plan_key', None)
             await update.message.reply_text(
@@ -739,7 +729,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
 
-        conn.close()
+        client.close()
         admin_msg = (
             f"🔔 **Manual UTR Check Needed!**\n\n"
             f"👤 User: {user.first_name} (`{user.id}`)\n"
@@ -760,11 +750,10 @@ async def channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user = update.effective_user
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, channel_info, platform FROM connected_channels WHERE user_id = ?", (user.id,))
-    user_chans = cursor.fetchall()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT id, channel_info, platform FROM connected_channels WHERE user_id = ?", (user.id,))
+    client.close()
+    ch_rows = res.rows if hasattr(res, 'rows') else res
     
     text = "📺 **Connected Channels & Pages:**\n\nAap apne YouTube channels aur Instagram pages yahan manage kar sakte hain:\n\n"
     keyboard = [
@@ -774,9 +763,9 @@ async def channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("➕ Add New Channel / Page", callback_data="add_account")]
     ]
     
-    if user_chans:
+    if ch_rows:
         text += "**Aapke Connected Channels:**\n"
-        for ch in user_chans:
+        for ch in ch_rows:
             c_id, c_info, c_plat = ch[0], ch[1], ch[2]
             text += f"• {c_plat}: `{c_info}`\n"
             keyboard.append([InlineKeyboardButton(f"🗑️ Remove {c_info}", callback_data=f"remove_chan_{c_id}")])
@@ -789,11 +778,9 @@ async def remove_user_channel(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     ch_id = int(query.data.split("_")[2])
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM connected_channels WHERE id = ?", (ch_id,))
-    conn.commit()
-    conn.close()
+    client = get_db()
+    client.execute("DELETE FROM connected_channels WHERE id = ?", (ch_id,))
+    client.close()
     
     await query.answer("Channel removed successfully!", show_alert=True)
     await channels_callback(update, context)
@@ -867,11 +854,10 @@ async def channel_management_callback(update: Update, context: ContextTypes.DEFA
     
     platform_db = "Instagram" if "ig" in query.data else "YouTube"
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, channel_info, active_mode, selected_niche FROM connected_channels WHERE user_id = ? AND platform = ?", (user.id, platform_db))
-    channels = cursor.fetchall()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT id, channel_info, active_mode, selected_niche FROM connected_channels WHERE user_id = ? AND platform = ?", (user.id, platform_db))
+    client.close()
+    channels = res.rows if hasattr(res, 'rows') else res
     
     text = f"📺 **{platform_db} Management:**\n\nSelect a channel/page below to manage its modes & settings:\n\n"
     keyboard = []
@@ -906,11 +892,11 @@ async def show_specific_channel_modes(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     user = update.effective_user
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, channel_info, active_mode, selected_niche, platform FROM connected_channels WHERE id = ? AND user_id = ?", (channel_id, user.id))
-    ch = cursor.fetchone()
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT id, channel_info, active_mode, selected_niche, platform FROM connected_channels WHERE id = ? AND user_id = ?", (channel_id, user.id))
+    client.close()
+    ch_rows = res.rows if hasattr(res, 'rows') else res
+    ch = ch_rows[0] if ch_rows else None
     
     if not ch:
         await query.answer("Channel not found!", show_alert=True)
@@ -984,15 +970,13 @@ async def handle_mode_niche_pick(update: Update, context: ContextTypes.DEFAULT_T
     data = query.data.split("_")
     action = data[0]
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    client = get_db()
     
     if action == "setmode":
         mode = data[1]
         ch_id = int(data[2])
-        cursor.execute("UPDATE connected_channels SET active_mode = ? WHERE id = ?", (mode, ch_id))
-        conn.commit()
-        conn.close()
+        client.execute("UPDATE connected_channels SET active_mode = ? WHERE id = ?", (mode, ch_id))
+        client.close()
         await query.answer(f"Mode changed to: {mode.upper()}")
         await show_specific_channel_modes(update, context, ch_id)
         
@@ -1000,9 +984,8 @@ async def handle_mode_niche_pick(update: Update, context: ContextTypes.DEFAULT_T
         niche_idx = int(data[1])
         ch_id = int(data[2])
         selected_niche = NICHE_LIST[niche_idx]
-        cursor.execute("UPDATE connected_channels SET active_mode = 'ai', selected_niche = ? WHERE id = ?", (selected_niche, ch_id))
-        conn.commit()
-        conn.close()
+        client.execute("UPDATE connected_channels SET active_mode = 'ai', selected_niche = ? WHERE id = ?", (selected_niche, ch_id))
+        client.close()
         await query.answer(f"AI Niche set to: {selected_niche}")
         await show_specific_channel_modes(update, context, ch_id)
 
@@ -1014,18 +997,17 @@ async def channel_schedule_menu(update: Update, context: ContextTypes.DEFAULT_TY
     ch_id = int(data[2])
     context.user_data['active_channel_id'] = ch_id
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules WHERE user_id = ?", (update.effective_user.id,))
-    row = cursor.fetchone()
+    client = get_db()
+    res = client.execute("SELECT slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules WHERE user_id = ?", (update.effective_user.id,))
+    sched_rows = res.rows if hasattr(res, 'rows') else res
+    row = sched_rows[0] if sched_rows else None
     
     if not row:
-        cursor.execute("INSERT INTO upload_schedules (user_id) VALUES (?)", (update.effective_user.id,))
-        conn.commit()
+        client.execute("INSERT INTO upload_schedules (user_id) VALUES (?)", (update.effective_user.id,))
         slots = ['09:00', '12:00', '15:00', '18:00', '21:00', '23:00']
     else:
         slots = list(row)
-    conn.close()
+    client.close()
     
     active_count = sum(1 for s in slots if s and s.strip() != "" and s != "None")
     
@@ -1078,11 +1060,9 @@ async def delete_slot_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     ch_id = int(data[3])
     
     col_name = f"slot_{slot_num}"
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(f"UPDATE upload_schedules SET {col_name} = 'None' WHERE user_id = ?", (update.effective_user.id,))
-    conn.commit()
-    conn.close()
+    client = get_db()
+    client.execute(f"UPDATE upload_schedules SET {col_name} = 'None' WHERE user_id = ?", (update.effective_user.id,))
+    client.close()
     
     await query.answer(f"Slot {slot_num} deleted!", show_alert=True)
     await channel_schedule_menu(update, context)
@@ -1092,20 +1072,22 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = update.effective_user.id
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    client = get_db()
     
-    cursor.execute("SELECT COUNT(*) FROM connected_channels WHERE user_id = ?", (user_id,))
-    active_channels_count = cursor.fetchone()[0]
+    res_c = client.execute("SELECT COUNT(*) FROM connected_channels WHERE user_id = ?", (user_id,))
+    c_rows = res_c.rows if hasattr(res_c, 'rows') else res_c
+    active_channels_count = c_rows[0][0] if c_rows else 0
     
-    cursor.execute("SELECT slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
+    res_s = client.execute("SELECT slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules WHERE user_id = ?", (user_id,))
+    s_rows = res_s.rows if hasattr(res_s, 'rows') else res_s
+    row = s_rows[0] if s_rows else None
+    
+    client.close()
+    
     pending_slots = 0
     if row:
         pending_slots = sum(1 for s in row if s and s.strip() != "" and s != "None")
         
-    conn.close()
-    
     text = (
         "📊 **System Status Logs:**\n\n"
         f"• **Active Channels:** `{active_channels_count}`\n"
@@ -1178,11 +1160,11 @@ async def admin_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "Yahan se aap saare users, subscriptions aur user menu buttons ko **On / Off** control kar sakte hain:"
     )
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT feature_key, is_enabled FROM feature_controls")
-    controls = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
+    client = get_db()
+    res = client.execute("SELECT feature_key, is_enabled FROM feature_controls")
+    client.close()
+    feat_rows = res.rows if hasattr(res, 'rows') else res
+    controls = {row[0]: row[1] for row in feat_rows}
 
     def status_icon(key):
         return "🟢 ON" if controls.get(key, 1) == 1 else "🔴 OFF"
@@ -1218,17 +1200,16 @@ async def toggle_feature_handler(update: Update, context: ContextTypes.DEFAULT_T
     if feat_key == "ignore":
         return
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT is_enabled FROM feature_controls WHERE feature_key = ?", (feat_key,))
-    row = cursor.fetchone()
+    client = get_db()
+    res = client.execute("SELECT is_enabled FROM feature_controls WHERE feature_key = ?", (feat_key,))
+    f_rows = res.rows if hasattr(res, 'rows') else res
+    row = f_rows[0] if f_rows else None
     
     current_status = row[0] if row else 1
     new_status = 0 if current_status == 1 else 1
     
-    cursor.execute("INSERT OR REPLACE INTO feature_controls (feature_key, is_enabled) VALUES (?, ?)", (feat_key, new_status))
-    conn.commit()
-    conn.close()
+    client.execute("INSERT OR REPLACE INTO feature_controls (feature_key, is_enabled) VALUES (?, ?)", (feat_key, new_status))
+    client.close()
     
     await admin_panel_callback(update, context)
 
@@ -1238,11 +1219,10 @@ async def admin_sub_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     if data == "admin_users":
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id, plan_name, buy_date, expire_date FROM subscriptions")
-        users = cursor.fetchall()
-        conn.close()
+        client = get_db()
+        res = client.execute("SELECT user_id, plan_name, buy_date, expire_date FROM subscriptions")
+        client.close()
+        users = res.rows if hasattr(res, 'rows') else res
         
         text = "👥 **All Registered Users & Activity:**\n\n"
         if users:
@@ -1352,12 +1332,10 @@ async def handle_approval_callback(update: Update, context: ContextTypes.DEFAULT
         buy_d = datetime.now().strftime("%Y-%m-%d")
         exp_d = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
+        client = get_db()
+        client.execute("INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
                        (int(user_id), plan_name, buy_d, exp_d))
-        conn.commit()
-        conn.close()
+        client.close()
         
         new_caption = (query.message.caption or "") + "\n\n✅ **Payment Received & Verified! Status: Subscription Activated**"
         try:
@@ -1487,26 +1465,24 @@ async def generate_and_upload_ai_video(bot, user_id, channel_name, niche):
 async def check_and_run_schedules(bot):
     current_time = datetime.now().strftime("%H:%M")
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT user_id, slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules")
-    schedules = cursor.fetchall()
+    client = get_db()
+    res_sch = client.execute("SELECT user_id, slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules")
+    schedules = res_sch.rows if hasattr(res_sch, 'rows') else res_sch
     
     for sched in schedules:
         user_id = sched[0]
         active_slots = [sched[1], sched[2], sched[3], sched[4], sched[5], sched[6]]
         
         if current_time in active_slots:
-            cursor.execute("SELECT id, platform, channel_info, active_mode, selected_niche FROM connected_channels WHERE user_id = ? AND active_mode != 'none'", (user_id,))
-            channels = cursor.fetchall()
+            res_ch = client.execute("SELECT id, platform, channel_info, active_mode, selected_niche FROM connected_channels WHERE user_id = ? AND active_mode != 'none'", (user_id,))
+            channels = res_ch.rows if hasattr(res_ch, 'rows') else res_ch
             
             for ch in channels:
                 ch_id, platform, ch_name, mode, niche = ch
                 if mode == 'ai':
                     await generate_and_upload_ai_video(bot, user_id, ch_name, niche)
                     
-    conn.close()
+    client.close()
 
 async def background_scheduler_loop(bot):
     while True:
@@ -1537,13 +1513,10 @@ def payment_webhook():
     
     if utr_match:
         utr_number = utr_match.group(0)
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        
-        cursor.execute("INSERT OR IGNORE INTO received_payments (utr, raw_text, is_used, received_at) VALUES (?, ?, 0, ?)",
+        client = get_db()
+        client.execute("INSERT OR IGNORE INTO received_payments (utr, raw_text, is_used, received_at) VALUES (?, ?, 0, ?)",
                        (utr_number, notif_text, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        conn.commit()
-        conn.close()
+        client.close()
         return jsonify({"status": "success", "utr_saved": utr_number}), 200
         
     return jsonify({"status": "ignored", "message": "No 12-digit UTR found"}), 200
@@ -1595,7 +1568,7 @@ def main():
 
     app.post_init = post_init
 
-    print("🤖 Bot is running smoothly with Full Feature Controls & Smart Approval Flow...")
+    print("🤖 Bot is running smoothly with Turso Cloud DB & Full Feature Controls...")
     app.run_polling()
 
 if __name__ == "__main__":
