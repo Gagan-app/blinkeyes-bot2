@@ -30,8 +30,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 8122669942
 
 # --- TURSO DATABASE CREDENTIALS ---
-TURSO_URL = "libsql://mybotdb-gaganllc.aws-ap-south-1.turso.io"      # Yahan apna Turso URL daalein
-TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ5NDc4MjUsImlkIjoiMDFhMWViMzEtM2QwMS03YThlLWJlMWQtOGE1ZjhiNTYyNjc4Iiwia2lkIjoiNTRfWjhvUlpPbUFmTEZuSzRRS1I2dlhMcE5IbzRXQVRDRFFMSW55QkpQUSIsInJpZCI6ImU4YmUwNjA0LTgxZDYtNDU2MC05ODkwLWM3MjkyMDU2NGQ1YiJ9._CTAZghoZEiOvnP8OMyAZZWJj7_eMyjW4Ew12FdPZLJMB1604LqXL5Ge5hkRKblxmrWpYXFE7rkVrn6fB-SDCw"       # Yahan apna Turso Auth Token daalein
+TURSO_URL = "libsql://mybotdb-gaganllc.aws-ap-south-1.turso.io"
+TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ5NDc4MjUsImlkIjoiMDFhMWViMzEtM2QwMS03YThlLWJlMWQtOGE1ZjhiNTYyNjc4Iiwia2lkIjoiNTRfWjhvUlpPbUFmTEZuSzRRS1I2dlhMcE5IbzRXQVRDRFFMSW55QkpQUSIsInJpZCI6ImU4YmUwNjA0LTgxZDYtNDU2MC05ODkwLWM3MjkyMDU2NGQ1YiJ9._CTAZghoZEiOvnP8OMyAZZWJj7_eMyjW4Ew12FdPZLJMB1604LqXL5Ge5hkRKblxmrWpYXFE7rkVrn6fB-SDCw"
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -1076,7 +1076,7 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client = get_db()
     
     res_c = client.execute("SELECT COUNT(*) FROM connected_channels WHERE user_id = ?", (user_id,))
-    c_rows = res_c.rows if hasattr(res_c, 'rows') else res_c
+    c_rows = res_c.rows if hasattr(res, 'rows') else res_c
     active_channels_count = c_rows[0][0] if c_rows else 0
     
     res_s = client.execute("SELECT slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules WHERE user_id = ?", (user_id,))
