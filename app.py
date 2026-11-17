@@ -1512,6 +1512,7 @@ def home():
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
+
 @web_app.route('/webhook/payment', methods=['POST'])
 def payment_webhook():
     data = request.json or {}
@@ -1523,7 +1524,7 @@ def payment_webhook():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Bina amount ke bhi sabse latest pending user ko turant utha lo
+    # Sabse latest pending payment uthao
     cursor.execute("SELECT id, user_id, plan_key FROM pending_payments ORDER BY id DESC LIMIT 1")
     pending = cursor.fetchone()
     
@@ -1533,7 +1534,7 @@ def payment_webhook():
         
     p_id, user_id, plan_key = pending
     
-    # Is pending payment ko delete kar do taaki dubara use na ho
+    # Pending payment delete karo taaki dubara use na ho
     cursor.execute("DELETE FROM pending_payments WHERE id = ?", (p_id,))
     conn.commit()
     conn.close()
@@ -1550,21 +1551,31 @@ def payment_webhook():
     conn.commit()
     conn.close()
     
+    # User ko Telegram par success message bhejna aur buttons hatana
     try:
+        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         import telegram
         bot_instance = telegram.Bot(token=BOT_TOKEN)
+        
+        success_text = (
+            f"✅ **Payment Successfull!**\n\n"
+            f"🎉 Aapka **{plan_name}** subscription successfully activate kar diya gaya hai!\n"
+            f"📅 Valid upto: `{exp_d}`\n\n"
+            f"Ab aap apne channels manage kar sakte hain."
+        )
+        
         loop.run_until_complete(bot_instance.send_message(
             chat_id=int(user_id),
-            text=f"🎉 **Payment Successful & Verified Automatically!**\n\nAapka **{plan_name}** subscription activate kar diya gaya hai! Ab aap apne channels manage kar sakte hain.",
+            text=success_text,
             parse_mode="Markdown"
         ))
     except Exception as e:
         logging.error(f"Error sending automatic success message: {e}")
         
     return jsonify({"status": "success", "message": f"Subscription activated for user {user_id}!"}), 200
-    
+      
 # --- MAIN FUNCTION ---
 def main():
     threading.Thread(target=run_web, daemon=True).start()
