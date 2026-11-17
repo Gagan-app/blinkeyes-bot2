@@ -1524,56 +1524,128 @@ def payment_webhook():
     return jsonify({"status": "ignored", "message": "No 12-digit UTR found"}), 200
 
 def main():
-    threading.Thread(target=run_web, daemon=True).start()
+  app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+  app.add_handler(CommandHandler("start", start))
+  app.add_handler(CommandHandler("setqr", set_qr_command))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("setqr", set_qr_command))
-    
-    app.add_handler(CallbackQueryHandler(start, pattern="^back_home$"))
-    app.add_handler(CallbackQueryHandler(profile_callback, pattern="^menu_profile$"))
-    app.add_handler(CallbackQueryHandler(sub_plans_callback, pattern="^sub_plans$"))
-    app.add_handler(CallbackQueryHandler(subscription_status_menu, pattern="^menu_subscription$"))
-    app.add_handler(CallbackQueryHandler(status_callback, pattern="^menu_status$"))
-    app.add_handler(CallbackQueryHandler(help_support_callback, pattern="^menu_help$"))
-    app.add_handler(CallbackQueryHandler(guide_tutorial_callback, pattern="^view_guide$"))
-    app.add_handler(CallbackQueryHandler(contact_support_callback, pattern="^send_support$"))
-    app.add_handler(CallbackQueryHandler(prompt_coupon_handler, pattern="^prompt_coupon_"))
-    app.add_handler(CallbackQueryHandler(channels_callback, pattern="^menu_channels$"))
+  app.add_handler(CallbackQueryHandler(start, pattern="^back_home$"))
+  app.add_handler(CallbackQueryHandler(profile_callback, pattern="^menu_profile$"))
+  app.add_handler(CallbackQueryHandler(sub_plans_callback, pattern="^sub_plans$"))
+  app.add_handler(
+      CallbackQueryHandler(
+          subscription_status_menu, pattern="^menu_subscription$"
+      )
+  )
+  app.add_handler(CallbackQueryHandler(status_callback, pattern="^menu_status$"))
+  app.add_handler(
+      CallbackQueryHandler(help_support_callback, pattern="^menu_help$")
+  )
+  app.add_handler(
+      CallbackQueryHandler(guide_tutorial_callback, pattern="^view_guide$")
+  )
+  app.add_handler(
+      CallbackQueryHandler(contact_support_callback, pattern="^send_support$")
+  )
+  app.add_handler(
+      CallbackQueryHandler(prompt_coupon_handler, pattern="^prompt_coupon_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(channels_callback, pattern="^menu_channels$")
+  )
 
-    app.add_handler(CallbackQueryHandler(select_plan_callback, pattern="^pay_(silver|gold|platinum)_(99|499|249|1299|399|2199)$"))
-    app.add_handler(CallbackQueryHandler(submit_utr_prompt, pattern="^submit_utr_"))
+  app.add_handler(
+      CallbackQueryHandler(
+          select_plan_callback,
+          pattern=(
+              "^pay_(silver|gold|platinum)_(99|499|249|1299|399|2199)$"
+          ),
+      )
+  )
+  app.add_handler(
+      CallbackQueryHandler(submit_utr_prompt, pattern="^submit_utr_")
+  )
 
-    app.add_handler(CallbackQueryHandler(admin_panel_callback, pattern="^menu_admin$"))
-    app.add_handler(CallbackQueryHandler(admin_sub_actions, pattern="^admin_(users|gen_gift|subs|set_qr|tickets)$"))
-    app.add_handler(CallbackQueryHandler(edit_sub_price_prompt, pattern="^edit_price_"))
-    app.add_handler(CallbackQueryHandler(handle_approval_callback, pattern="^(approve|reject)_"))
-    app.add_handler(CallbackQueryHandler(toggle_feature_handler, pattern="^toggle_feat_"))
-    app.add_handler(CallbackQueryHandler(admin_reply_prompt, pattern="^reply_user_"))
+  app.add_handler(
+      CallbackQueryHandler(admin_panel_callback, pattern="^menu_admin$")
+  )
+  app.add_handler(
+      CallbackQueryHandler(
+          admin_sub_actions,
+          pattern="^admin_(users|gen_gift|subs|set_qr|tickets)$",
+      )
+  )
+  app.add_handler(
+      CallbackQueryHandler(edit_sub_price_prompt, pattern="^edit_price_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(
+          handle_approval_callback, pattern="^(approve|reject)_"
+      )
+  )
+  app.add_handler(
+      CallbackQueryHandler(toggle_feature_handler, pattern="^toggle_feat_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(admin_reply_prompt, pattern="^reply_user_")
+  )
 
-    app.add_handler(CallbackQueryHandler(channel_management_callback, pattern="^(yt_manage|ig_manage)$"))
-    app.add_handler(CallbackQueryHandler(handle_channel_selection, pattern="^select_ch_"))
-    app.add_handler(CallbackQueryHandler(show_niche_dropdown, pattern="^show_niches_"))
-    app.add_handler(CallbackQueryHandler(handle_mode_niche_pick, pattern="^(setmode|pickniche)_"))
-    app.add_handler(CallbackQueryHandler(channel_schedule_menu, pattern="^ch_schedule_"))
-    app.add_handler(CallbackQueryHandler(manage_slot_options, pattern="^manage_slot_"))
-    app.add_handler(CallbackQueryHandler(delete_slot_handler, pattern="^del_slot_"))
-    app.add_handler(CallbackQueryHandler(remove_user_channel, pattern="^remove_chan_"))
-    app.add_handler(CallbackQueryHandler(prompt_add_account, pattern="^add_account$"))
-    app.add_handler(CallbackQueryHandler(start_youtube_auth, pattern="^auth_youtube$"))
+  app.add_handler(
+      CallbackQueryHandler(
+          channel_management_callback, pattern="^(yt_manage|ig_manage)$"
+      )
+  )
+  app.add_handler(
+      CallbackQueryHandler(handle_channel_selection, pattern="^select_ch_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(show_niche_dropdown, pattern="^show_niches_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(
+          handle_mode_niche_pick, pattern="^(setmode|pickniche)_"
+      )
+  )
+  app.add_handler(
+      CallbackQueryHandler(channel_schedule_menu, pattern="^ch_schedule_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(manage_slot_options, pattern="^manage_slot_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(delete_slot_handler, pattern="^del_slot_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(remove_user_channel, pattern="^remove_chan_")
+  )
+  app.add_handler(
+      CallbackQueryHandler(prompt_add_account, pattern="^add_account$")
+  )
+  app.add_handler(
+      CallbackQueryHandler(start_youtube_auth, pattern="^auth_youtube$")
+  )
 
-    app.add_handler(MessageHandler((filters.TEXT | filters.VIDEO | filters.Document.ALL) & (~filters.COMMAND), handle_text_messages))
+  app.add_handler(
+      MessageHandler(
+          (filters.TEXT | filters.VIDEO | filters.Document.ALL)
+          & (~filters.COMMAND),
+          handle_text_messages,
+      )
+  )
 
-    async def post_init(application):
-        asyncio.create_task(background_scheduler_loop(application.bot))
+  async def post_init(application):
+    asyncio.create_task(background_scheduler_loop(application.bot))
 
-    app.post_init = post_init
+  app.post_init = post_init
 
-    print("🤖 Bot is running smoothly with Turso Cloud DB & Full Feature Controls...")
-    app.run_polling()
+  print("🤖 Bot is running smoothly with Turso Cloud DB & Full Feature Controls...")
+  app.run_polling()
+
 
 if __name__ == "__main__":
+  # Flask server ko loop ke BAHAR ek hi baar background thread mein start karenge
+  threading.Thread(target=run_web, daemon=True).start()
+
   while True:
     try:
       print("🤖 Bot restarting polling...")
