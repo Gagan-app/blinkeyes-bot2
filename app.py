@@ -7,7 +7,6 @@ import os
 import asyncio
 import random
 import string
-import json
 import re
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
@@ -396,7 +395,7 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     
     plan_key = f"{plan_type}_{duration}"
     context.user_data['active_plan_key'] = plan_key
-    context.user_data['pending_plan_key'] = plan_key # Store for UTR detection
+    context.user_data['pending_plan_key'] = plan_key 
     
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -666,7 +665,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             channel_title = f"YouTube Channel ({user.first_name})"
             try:
                 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-                from google.oauth2.credentials import Credentials
                 creds = Credentials.from_authorized_user_file(token_file_path, SCOPES)
                 youtube = build('youtube', 'v3', credentials=creds)
                 channels_response = youtube.channels().list(mine=True, part='snippet').execute()
@@ -703,7 +701,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop('oauth_flow', None)
         return
 
-    # --- ⚡ TERMUX & DATABASE AUTO-MATCH VERIFICATION ---
     if 'pending_plan_key' in context.user_data:
         plan_key = context.user_data.get('pending_plan_key', 'silver_99')
         utr_input = re.sub(r'\D', '', text_content)
@@ -717,7 +714,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         cursor.execute("SELECT is_used FROM received_payments WHERE utr = ?", (utr_input,))
         payment_record = cursor.fetchone()
         
-        # Agar Termux webhook ke zariye payment pehle hi database mein aa chuki hai
         if payment_record and payment_record[0] == 0:
             cursor.execute("UPDATE received_payments SET is_used = 1 WHERE utr = ?", (utr_input,))
             
@@ -743,7 +739,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
 
-        # Agar payment abhi database mein nahi aayi hai, toh Admin approval fallback bhej do
         conn.close()
         admin_msg = (
             f"🔔 **Manual UTR Check Needed!**\n\n"
@@ -1400,7 +1395,6 @@ async def handle_approval_callback(update: Update, context: ContextTypes.DEFAULT
         except Exception as e:
             print(f"Error notifying user: {e}")
 
-# --- 🚀 ADVANCED KLING AI STYLE CINEMATIC VIDEO GENERATOR ---
 async def generate_and_upload_ai_video(bot, user_id, channel_name, niche):
     try:
         if not await check_user_subscription_active(user_id):
@@ -1522,7 +1516,6 @@ async def background_scheduler_loop(bot):
             logging.error(f"Scheduler Loop Error: {e}")
         await asyncio.sleep(60)
 
-# --- 🌐 RENDER WEB PORT KEEPER & PAYMENT WEBHOOK ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -1547,7 +1540,6 @@ def payment_webhook():
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         
-        # Check karein ki kya koi user is waqt yeh UTR enter karne ka wait kar raha hai ya pending hai
         cursor.execute("INSERT OR IGNORE INTO received_payments (utr, raw_text, is_used, received_at) VALUES (?, ?, 0, ?)",
                        (utr_number, notif_text, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
@@ -1556,7 +1548,6 @@ def payment_webhook():
         
     return jsonify({"status": "ignored", "message": "No 12-digit UTR found"}), 200
 
-# --- MAIN FUNCTION ---
 def main():
     threading.Thread(target=run_web, daemon=True).start()
 
@@ -1593,7 +1584,7 @@ def main():
     app.add_handler(CallbackQueryHandler(channel_schedule_menu, pattern="^ch_schedule_"))
     app.add_handler(CallbackQueryHandler(manage_slot_options, pattern="^manage_slot_"))
     app.add_handler(CallbackQueryHandler(delete_slot_handler, pattern="^del_slot_"))
-    app.add_handler(CallbackGroupHandler if 'CallbackGroupHandler' in globals() else CallbackQueryHandler(remove_user_channel, pattern="^remove_chan_"))
+    app.add_handler(CallbackQueryHandler(remove_user_channel, pattern="^remove_chan_"))
     app.add_handler(CallbackQueryHandler(prompt_add_account, pattern="^add_account$"))
     app.add_handler(CallbackQueryHandler(start_youtube_auth, pattern="^auth_youtube$"))
 
