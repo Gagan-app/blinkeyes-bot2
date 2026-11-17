@@ -101,18 +101,19 @@ NICHE_LIST = [
 ]
 
 def get_db():
-    return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
+  return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
-def ensure_tables_exist():
-    client = get_db()
-    client.execute('''
+
+async def ensure_tables_exist():
+  client = get_db()
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS payment_configs (
             plan_key TEXT PRIMARY KEY,
             upi_id TEXT,
             qr_image_file_id TEXT
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS connected_channels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -124,7 +125,7 @@ def ensure_tables_exist():
             custom_prompt TEXT DEFAULT 'none'
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS subscriptions (
             user_id INTEGER PRIMARY KEY,
             plan_name TEXT DEFAULT 'Free Trial',
@@ -132,7 +133,7 @@ def ensure_tables_exist():
             expire_date TEXT
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS gift_codes (
             code TEXT PRIMARY KEY,
             plan_name TEXT,
@@ -140,13 +141,13 @@ def ensure_tables_exist():
             discount_value REAL
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS subscription_prices (
             plan_key TEXT PRIMARY KEY,
             price REAL
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS upload_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -158,7 +159,7 @@ def ensure_tables_exist():
             slot_6 TEXT DEFAULT '23:00'
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS pending_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -167,7 +168,7 @@ def ensure_tables_exist():
             created_at TEXT
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS received_payments (
             utr TEXT PRIMARY KEY,
             raw_text TEXT,
@@ -175,13 +176,13 @@ def ensure_tables_exist():
             received_at TEXT
         )
     ''')
-    client.execute('''
+  await client.execute('''
         CREATE TABLE IF NOT EXISTS feature_controls (
             feature_key TEXT PRIMARY KEY,
             is_enabled INTEGER DEFAULT 1
         )
     ''')
-    client.close()
+  await client.close()
 
 ensure_tables_exist()
 
