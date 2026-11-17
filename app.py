@@ -162,6 +162,14 @@ def ensure_tables_exist():
         )
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS received_payments (
+            utr TEXT PRIMARY KEY,
+            raw_text TEXT,
+            is_used INTEGER DEFAULT 0,
+            received_at TEXT
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS feature_controls (
             feature_key TEXT PRIMARY KEY,
             is_enabled INTEGER DEFAULT 1
@@ -179,10 +187,10 @@ def is_feature_enabled(key):
     row = cursor.fetchone()
     conn.close()
     return (row[0] == 1) if row else True
+
 def get_payment_config(plan_key):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Pehle specific plan ki UPI ID check karein
     cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE plan_key = ?", (plan_key,))
     result = cursor.fetchone()
     
@@ -190,7 +198,6 @@ def get_payment_config(plan_key):
         conn.close()
         return result
     
-    # Agar specific plan ki nahi hai, toh koi bhi nayi real UPI ID utha lo jo admin ne set ki ho
     cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
     fallback = cursor.fetchone()
     conn.close()
@@ -389,6 +396,7 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     
     plan_key = f"{plan_type}_{duration}"
     context.user_data['active_plan_key'] = plan_key
+    context.user_data['pending_plan_key'] = plan_key # Store for UTR detection
     
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -413,16 +421,6 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 discount_text = f"\n🏷️ Coupon Applied: `{g_code}` (₹{d_val} OFF)"
                 
     context.user_data['final_price'] = final_price
-    
-    # Save pending payment entry for auto-verification
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO pending_payments (user_id, plan_key, amount, created_at) VALUES (?, ?, ?, ?)",
-        (update.effective_user.id, plan_key, final_price, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    conn.commit()
-    conn.close()
     
     upi_id, qr_file_id = get_payment_config(plan_key)
     if not upi_id or upi_id == 'your_merchant_upi@paytm':
@@ -705,21 +703,66 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop('oauth_flow', None)
         return
 
+    # --- ⚡ INSTANT UTR VERIFICATION & ACTIVATION ---
     if 'pending_plan_key' in context.user_data:
-        plan = context.user_data.get('pending_plan', 'Silver')
+        plan_key = context.user_data.get('pending_plan_key', 'silver_99')
+        utr_input = re.sub(r'\D', '', text_content) # Extract digits
+        
+        if len(utr_input) != 12:
+            await update.message.reply_text("⚠️ Kripya sahi **12-digit UPI Transaction ID (UTR)** enter karein:")
+            return
+
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_used FROM received_payments WHERE utr = ?", (utr_input,))
+        payment_record = cursor.fetchone()
+        
+        # Case 1: Payment already received via MacroDroid webhook
+        if payment_record and payment_record[0] == 0:
+            cursor.execute("UPDATE received_payments SET is_used = 1 WHERE utr = ?", (utr_input,))
+            
+            duration_days = 180 if any(x in plan_key for x in ["499", "1299", "2199"]) else 30
+            plan_name = plan_key.replace("_", " ").title()
+            buy_d = datetime.now().strftime("%Y-%m-%d")
+            exp_d = (datetime.now() + timedelta(days=duration_days)).strftime("%Y-%m-%d")
+            
+            cursor.execute(
+                "INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
+                (user.id, plan_name, buy_d, exp_d)
+            )
+            conn.commit()
+            conn.close()
+            
+            context.user_data.pop('pending_plan_key', None)
+            await update.message.reply_text(
+                f"✅ **Payment Received & Verified!**\n\n"
+                f"🎉 Aapka **{plan_name}** subscription automatically activate kar diya gaya hai!\n"
+                f"🧾 UTR: `{utr_input}`\n"
+                f"📅 Valid Upto: `{exp_d}`",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Case 2: UTR already used
+        elif payment_record and payment_record[0] == 1:
+            conn.close()
+            await update.message.reply_text("❌ Yeh UTR number pehle hi use kiya ja chuka hai! Kripya apna valid UTR check karein.")
+            return
+
+        # Case 3: Webhook delay fallback -> Send to Admin for quick approval
+        conn.close()
         admin_msg = (
-            f"🔔 **New Payment Request!**\n\n"
-            f"👤 User: {user.first_name} (@{user.username})\n"
-            f"🆔 User ID: `{user.id}`\n"
-            f"📦 Plan: {plan}\n"
-            f"💳 UTR / Txn ID: `{text_content}`"
+            f"🔔 **Manual UTR Check Needed!**\n\n"
+            f"👤 User: {user.first_name} (`{user.id}`)\n"
+            f"📦 Plan: `{plan_key}`\n"
+            f"💳 UTR: `{utr_input}`"
         )
         keyboard = [
-            [InlineKeyboardButton("✅ Approve & Activate", callback_data=f"approve_{user.id}_{plan}"),
+            [InlineKeyboardButton("✅ Approve & Activate", callback_data=f"approve_{user.id}_{plan_key}"),
              InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")]
         ]
         await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        await update.message.reply_text("⏳ Aapki Transaction ID admin ke paas verification ke liye bhej di gayi hai. Active hote hi aapko notify kar diya jayega!")
+        await update.message.reply_text("⏳ Aapki UTR verify ki ja rahi hai. Payment confirm hote hi subscription activate ho jayegi!")
         context.user_data.pop('pending_plan_key', None)
         return
 
@@ -1502,7 +1545,7 @@ async def background_scheduler_loop(bot):
             logging.error(f"Scheduler Loop Error: {e}")
         await asyncio.sleep(60)
 
-# --- 🌐 RENDER WEB PORT KEEPER ---
+# --- 🌐 RENDER WEB PORT KEEPER & PAYMENT WEBHOOK ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -1521,60 +1564,22 @@ def payment_webhook():
     if secret_token != "blinkeyes_secure_pay_2026":
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
         
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    notif_text = str(data.get('text', ''))
+    utr_match = re.search(r'\b\d{12}\b', notif_text)
     
-    # Sabse latest pending payment uthao
-    cursor.execute("SELECT id, user_id, plan_key FROM pending_payments ORDER BY id DESC LIMIT 1")
-    pending = cursor.fetchone()
-    
-    if not pending:
-        conn.close()
-        return jsonify({"status": "error", "message": "No pending payment found"}), 404
-        
-    p_id, user_id, plan_key = pending
-    
-    # Pending payment delete karo taaki dubara use na ho
-    cursor.execute("DELETE FROM pending_payments WHERE id = ?", (p_id,))
-    conn.commit()
-    conn.close()
-    
-    duration_days = 180 if "499" in plan_key or "1299" in plan_key or "2199" in plan_key else 30
-    plan_name = plan_key.replace("_", " ").title()
-    buy_d = datetime.now().strftime("%Y-%m-%d")
-    exp_d = (datetime.now() + timedelta(days=duration_days)).strftime("%Y-%m-%d")
-    
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
-                   (int(user_id), plan_name, buy_d, exp_d))
-    conn.commit()
-    conn.close()
-    
-    # User ko Telegram par success message bhejna aur buttons hatana
-    try:
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        import telegram
-        bot_instance = telegram.Bot(token=BOT_TOKEN)
-        
-        success_text = (
-            f"✅ **Payment Successfull!**\n\n"
-            f"🎉 Aapka **{plan_name}** subscription successfully activate kar diya gaya hai!\n"
-            f"📅 Valid upto: `{exp_d}`\n\n"
-            f"Ab aap apne channels manage kar sakte hain."
+    if utr_match:
+        utr_number = utr_match.group(0)
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO received_payments (utr, raw_text, is_used, received_at) VALUES (?, ?, 0, ?)",
+            (utr_number, notif_text, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         )
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "success", "utr_saved": utr_number}), 200
         
-        loop.run_until_complete(bot_instance.send_message(
-            chat_id=int(user_id),
-            text=success_text,
-            parse_mode="Markdown"
-        ))
-    except Exception as e:
-        logging.error(f"Error sending automatic success message: {e}")
-        
-    return jsonify({"status": "success", "message": f"Subscription activated for user {user_id}!"}), 200
+    return jsonify({"status": "ignored", "message": "No 12-digit UTR found"}), 200
       
 # --- MAIN FUNCTION ---
 def main():
@@ -1624,7 +1629,7 @@ def main():
 
     app.post_init = post_init
 
-    print("🤖 Bot is running smoothly with Full Feature Controls & Support System...")
+    print("🤖 Bot is running smoothly with Full Feature Controls & Instant UTR Verification...")
     app.run_polling()
 
 if __name__ == "__main__":
