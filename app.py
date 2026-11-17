@@ -703,56 +703,18 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop('oauth_flow', None)
         return
 
-    # --- ⚡ INSTANT UTR VERIFICATION & ACTIVATION ---
+        # --- ⚡ DIRECT UTR SUBMISSION & ADMIN APPROVAL FLOW ---
     if 'pending_plan_key' in context.user_data:
         plan_key = context.user_data.get('pending_plan_key', 'silver_99')
-        utr_input = re.sub(r'\D', '', text_content) # Extract digits
+        utr_input = re.sub(r'\D', '', text_content) # Sirf digits nikalna
         
         if len(utr_input) != 12:
-            await update.message.reply_text("⚠️ Kripya sahi **12-digit UPI Transaction ID (UTR)** enter karein:")
+            await update.message.reply_text("⚠️ Kripya apni sahi **12-digit UPI Transaction ID (UTR)** enter karein:")
             return
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT is_used FROM received_payments WHERE utr = ?", (utr_input,))
-        payment_record = cursor.fetchone()
-        
-        # Case 1: Payment already received via MacroDroid webhook
-        if payment_record and payment_record[0] == 0:
-            cursor.execute("UPDATE received_payments SET is_used = 1 WHERE utr = ?", (utr_input,))
-            
-            duration_days = 180 if any(x in plan_key for x in ["499", "1299", "2199"]) else 30
-            plan_name = plan_key.replace("_", " ").title()
-            buy_d = datetime.now().strftime("%Y-%m-%d")
-            exp_d = (datetime.now() + timedelta(days=duration_days)).strftime("%Y-%m-%d")
-            
-            cursor.execute(
-                "INSERT OR REPLACE INTO subscriptions (user_id, plan_name, buy_date, expire_date) VALUES (?, ?, ?, ?)", 
-                (user.id, plan_name, buy_d, exp_d)
-            )
-            conn.commit()
-            conn.close()
-            
-            context.user_data.pop('pending_plan_key', None)
-            await update.message.reply_text(
-                f"✅ **Payment Received & Verified!**\n\n"
-                f"🎉 Aapka **{plan_name}** subscription automatically activate kar diya gaya hai!\n"
-                f"🧾 UTR: `{utr_input}`\n"
-                f"📅 Valid Upto: `{exp_d}`",
-                parse_mode="Markdown"
-            )
-            return
-
-        # Case 2: UTR already used
-        elif payment_record and payment_record[0] == 1:
-            conn.close()
-            await update.message.reply_text("❌ Yeh UTR number pehle hi use kiya ja chuka hai! Kripya apna valid UTR check karein.")
-            return
-
-        # Case 3: Webhook delay fallback -> Send to Admin for quick approval
-        conn.close()
+        # Seedha Admin ke paas approval ke liye bhejein (Zero Errors, No Webhook Needed)
         admin_msg = (
-            f"🔔 **Manual UTR Check Needed!**\n\n"
+            f"🔔 **New Payment Verification Request!**\n\n"
             f"👤 User: {user.first_name} (`{user.id}`)\n"
             f"📦 Plan: `{plan_key}`\n"
             f"💳 UTR: `{utr_input}`"
@@ -762,7 +724,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
              InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")]
         ]
         await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        await update.message.reply_text("⏳ Aapki UTR verify ki ja rahi hai. Payment confirm hote hi subscription activate ho jayegi!")
+        await update.message.reply_text("⏳ Aapki UTR verify ki ja rahi hai. Admin confirm karte hi subscription activate ho jayegi!")
         context.user_data.pop('pending_plan_key', None)
         return
 
@@ -782,7 +744,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         context.user_data['waiting_for_channel'] = False
         return
-
+        
 async def channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
