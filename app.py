@@ -703,16 +703,16 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop('oauth_flow', None)
         return
 
-        # --- ⚡ DIRECT UTR SUBMISSION & ADMIN APPROVAL FLOW ---
+    # --- ⚡ SMART UTR SUBMISSION & ADMIN APPROVAL FLOW ---
     if 'pending_plan_key' in context.user_data:
         plan_key = context.user_data.get('pending_plan_key', 'silver_99')
-        utr_input = re.sub(r'\D', '', text_content) # Sirf digits nikalna
+        utr_input = re.sub(r'\D', '', text_content) # Extract digits
         
         if len(utr_input) != 12:
-            await update.message.reply_text("⚠️ Kripya apni sahi **12-digit UPI Transaction ID (UTR)** enter karein:")
+            await update.message.reply_text("⚠️ Kripya sahi **12-digit UPI Transaction ID (UTR)** enter karein:")
             return
 
-        # Seedha Admin ke paas approval ke liye bhejein (Zero Errors, No Webhook Needed)
+        # Seedha Admin ke paas approval ke liye bhejein taaki payment verify karke activate kiya ja sake
         admin_msg = (
             f"🔔 **New Payment Verification Request!**\n\n"
             f"👤 User: {user.first_name} (`{user.id}`)\n"
@@ -724,7 +724,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
              InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")]
         ]
         await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        await update.message.reply_text("⏳ Aapki UTR verify ki ja rahi hai. Admin confirm karte hi subscription activate ho jayegi!")
+        await update.message.reply_text("⏳ Aapki UTR verify ki ja rahi hai. Payment confirm hote hi subscription activate ho jayegi!")
         context.user_data.pop('pending_plan_key', None)
         return
 
@@ -744,7 +744,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         context.user_data['waiting_for_channel'] = False
         return
-        
+
 async def channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1580,7 +1580,7 @@ def main():
     app.add_handler(CallbackQueryHandler(channel_schedule_menu, pattern="^ch_schedule_"))
     app.add_handler(CallbackQueryHandler(manage_slot_options, pattern="^manage_slot_"))
     app.add_handler(CallbackQueryHandler(delete_slot_handler, pattern="^del_slot_"))
-    app.add_handler(CallbackQueryHandler(remove_user_channel, pattern="^remove_chan_"))
+    app.add_handler(CallbackGroupHandler if 'CallbackGroupHandler' in globals() else CallbackQueryHandler(remove_user_channel, pattern="^remove_chan_"))
     app.add_handler(CallbackQueryHandler(prompt_add_account, pattern="^add_account$"))
     app.add_handler(CallbackQueryHandler(start_youtube_auth, pattern="^auth_youtube$"))
 
@@ -1591,7 +1591,7 @@ def main():
 
     app.post_init = post_init
 
-    print("🤖 Bot is running smoothly with Full Feature Controls & Instant UTR Verification...")
+    print("🤖 Bot is running smoothly with Full Feature Controls & Smart Approval Flow...")
     app.run_polling()
 
 if __name__ == "__main__":
