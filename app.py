@@ -1,4 +1,5 @@
 import sqlite3
+import time
 import logging
 import io
 import threading
@@ -1572,4 +1573,10 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
-    main()
+  while True:
+    try:
+      print("🤖 Bot restarting polling...")
+      main()
+    except Exception as e:
+      print(f"Connection Error: {e}. Reconnecting in 5 seconds...")
+      time.sleep(5)
