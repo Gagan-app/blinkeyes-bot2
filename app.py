@@ -26,7 +26,7 @@ import libsql_client  # <--- Turso Client Added
 # Logging configuration
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("9025362287:AAFZ2bN485I7QG_Upu_hy9CCM8mOWqpk68I")
 ADMIN_ID = 8122669942
 
 # --- TURSO DATABASE CREDENTIALS ---
