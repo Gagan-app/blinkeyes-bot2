@@ -29,8 +29,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 8122669942
 
 # --- TURSO DATABASE CREDENTIALS ---
-TURSO_URL = "libsql://aapka-database-url.turso.io"      # Yahan apna Turso URL daalein
-TURSO_TOKEN = "aapka_auth_token_yahan_aayega"       # Yahan apna Turso Auth Token daalein
+TURSO_URL = "libsql://mybotdb-gaganllc.aws-ap-south-1.turso.io"      # Yahan apna Turso URL daalein
+TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ5NDc4MjUsImlkIjoiMDFhMWViMzEtM2QwMS03YThlLWJlMWQtOGE1ZjhiNTYyNjc4Iiwia2lkIjoiNTRfWjhvUlpPbUFmTEZuSzRRS1I2dlhMcE5IbzRXQVRDRFFMSW55QkpQUSIsInJpZCI6ImU4YmUwNjA0LTgxZDYtNDU2MC05ODkwLWM3MjkyMDU2NGQ1YiJ9._CTAZghoZEiOvnP8OMyAZZWJj7_eMyjW4Ew12FdPZLJMB1604LqXL5Ge5hkRKblxmrWpYXFE7rkVrn6fB-SDCw"       # Yahan apna Turso Auth Token daalein
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
