@@ -179,19 +179,18 @@ def is_feature_enabled(key):
     row = cursor.fetchone()
     conn.close()
     return (row[0] == 1) if row else True
-
 def get_payment_config(plan_key):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # Pehle specific plan ki UPI ID check karein
     cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE plan_key = ?", (plan_key,))
     result = cursor.fetchone()
-    conn.close()
     
-    if result and result[0]:
+    if result and result[0] and result[0] != 'your_merchant_upi@paytm':
+        conn.close()
         return result
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    # Agar specific plan ki nahi hai, toh koi bhi nayi real UPI ID utha lo jo admin ne set ki ho
     cursor.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
     fallback = cursor.fetchone()
     conn.close()
@@ -199,7 +198,7 @@ def get_payment_config(plan_key):
     if fallback:
         return fallback
         
-    return result if result else ("your_merchant_upi@paytm", None)
+    return ("your_merchant_upi@paytm", None)
     
 def save_payment_config(plan_key, upi_id, qr_image_file_id=None):
     conn = sqlite3.connect(DB_NAME)
