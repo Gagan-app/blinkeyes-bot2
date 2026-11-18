@@ -184,8 +184,6 @@ async def ensure_tables_exist():
     ''')
   await client.close()
 
-# REMOVED top-level ensure_tables_exist() call to prevent blocking startup.
-
 def is_feature_enabled(key):
     try:
         client = get_db()
@@ -1602,7 +1600,7 @@ def main():
       CallbackQueryHandler(handle_channel_selection, pattern="^select_ch_")
   )
   app.add_handler(
-      CallbackKeyHandler := CallbackQueryHandler(show_niche_dropdown, pattern="^show_niches_")
+      CallbackQueryHandler(show_niche_dropdown, pattern="^show_niches_")
   )
   app.add_handler(
       CallbackQueryHandler(
@@ -1637,7 +1635,6 @@ def main():
   )
 
   async def post_init(application):
-    # Tables initialize karenge bot start hone par safely
     await ensure_tables_exist()
     asyncio.create_task(background_scheduler_loop(application.bot))
 
@@ -1648,7 +1645,6 @@ def main():
 
 
 if __name__ == "__main__":
-  # Flask server background thread mein start rahega Railway web check pass karne ke liye
   threading.Thread(target=run_web, daemon=True).start()
 
   while True:
