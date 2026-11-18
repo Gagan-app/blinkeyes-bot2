@@ -26,12 +26,13 @@ import libsql_client  # <--- Turso Client Added
 # Logging configuration
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 8122669942
+# --- FIXED: Railway Environment Variables ---
+BOT_TOKEN = os.getenv("BOT_TOKEN", "9025362287:AAFZ2bN485I7QG_Upu_hy9CCM8mOWqpk68I")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 8122669942))
 
 # --- TURSO DATABASE CREDENTIALS ---
-TURSO_URL = "libsql://mybotdb-gaganllc.aws-ap-south-1.turso.io"
-TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ5NDc4MjUsImlkIjoiMDFhMWViMzEtM2QwMS03YThlLWJlMWQtOGE1ZjhiNTYyNjc4Iiwia2lkIjoiNTRfWjhvUlpPbUFmTEZuSzRRS1I2dlhMcE5IbzRXQVRDRFFMSW55QkpQUSIsInJpZCI6ImU4YmUwNjA0LTgxZDYtNDU2MC05ODkwLWM3MjkyMDU2NGQ1YiJ9._CTAZghoZEiOvnP8OMyAZZWJj7_eMyjW4Ew12FdPZLJMB1604LqXL5Ge5hkRKblxmrWpYXFE7rkVrn6fB-SDCw"
+TURSO_URL = os.getenv("TURSO_URL", "libsql://mybotdb-gaganllc.aws-ap-south-1.turso.io")
+TURSO_TOKEN = os.getenv("TURSO_TOKEN", "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ5NDc4MjUsImlkIjoiMDFhMWViMzEtM2QwMS03YThlLWJlMWQtOGE1ZjhiNTYyNjc4Iiwia2lkIjoiNTRfWjhvUlpPbUFmTEZuSzRRS1I2dlhMcE5IbzRXQVRDRFFMSW55QkpQUSIsInJpZCI6ImU4YmUwNjA0LTgxZDYtNDU2MC05ODkwLWM3MjkyMDU2NGQ1YiJ9._CTAZghoZEiOvnP8OMyAZZWJj7_eMyjW4Ew12FdPZLJMB1604LqXL5Ge5hkRKblxmrWpYXFE7rkVrn6fB-SDCw")
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -102,7 +103,6 @@ NICHE_LIST = [
 
 def get_db():
   return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
-
 
 async def ensure_tables_exist():
   client = get_db()
@@ -184,14 +184,17 @@ async def ensure_tables_exist():
     ''')
   await client.close()
 
-ensure_tables_exist()
+# REMOVED top-level ensure_tables_exist() call to prevent blocking startup.
 
 def is_feature_enabled(key):
-    client = get_db()
-    res = client.execute("SELECT is_enabled FROM feature_controls WHERE feature_key = ?", (key,))
-    client.close()
-    row = res.rows if hasattr(res, 'rows') else res
-    return (row[0][0] == 1) if row else True
+    try:
+        client = get_db()
+        res = client.execute("SELECT is_enabled FROM feature_controls WHERE feature_key = ?", (key,))
+        client.close()
+        row = res.rows if hasattr(res, 'rows') else res
+        return (row[0][0] == 1) if row else True
+    except:
+        return True
 
 def get_payment_config(plan_key):
     client = get_db()
@@ -425,7 +428,7 @@ async def select_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     upi_id, qr_file_id = get_payment_config(plan_key)
     if not upi_id or upi_id == 'your_merchant_upi@paytm':
         client = get_db()
-        res_fb = client.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE UPI_id != 'your_merchant_upi@paytm' LIMIT 1")
+        res_fb = client.execute("SELECT upi_id, qr_image_file_id FROM payment_configs WHERE upi_id != 'your_merchant_upi@paytm' LIMIT 1")
         client.close()
         fb_rows = res_fb.rows if hasattr(res_fb, 'rows') else res_fb
         fallback_cfg = fb_rows[0] if fb_rows else None
@@ -1081,7 +1084,7 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_channels_count = c_rows[0][0] if c_rows else 0
     
     res_s = client.execute("SELECT slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules WHERE user_id = ?", (user_id,))
-    s_rows = res_s.rows if hasattr(res_s, 'rows') else res_s
+    s_rows = res_s.rows if hasattr(res, 'rows') else res_s
     row = s_rows[0] if s_rows else None
     
     client.close()
@@ -1469,7 +1472,7 @@ async def check_and_run_schedules(bot):
     
     client = get_db()
     res_sch = client.execute("SELECT user_id, slot_1, slot_2, slot_3, slot_4, slot_5, slot_6 FROM upload_schedules")
-    schedules = res_sch.rows if hasattr(res_sch, 'rows') else res_sch
+    schedules = res_sch.rows if hasattr(res, 'rows') else res_sch
     
     for sched in schedules:
         user_id = sched[0]
@@ -1599,7 +1602,7 @@ def main():
       CallbackQueryHandler(handle_channel_selection, pattern="^select_ch_")
   )
   app.add_handler(
-      CallbackQueryHandler(show_niche_dropdown, pattern="^show_niches_")
+      CallbackKeyHandler := CallbackQueryHandler(show_niche_dropdown, pattern="^show_niches_")
   )
   app.add_handler(
       CallbackQueryHandler(
@@ -1634,6 +1637,8 @@ def main():
   )
 
   async def post_init(application):
+    # Tables initialize karenge bot start hone par safely
+    await ensure_tables_exist()
     asyncio.create_task(background_scheduler_loop(application.bot))
 
   app.post_init = post_init
@@ -1643,7 +1648,7 @@ def main():
 
 
 if __name__ == "__main__":
-  # Flask server ko loop ke BAHAR ek hi baar background thread mein start karenge
+  # Flask server background thread mein start rahega Railway web check pass karne ke liye
   threading.Thread(target=run_web, daemon=True).start()
 
   while True:
